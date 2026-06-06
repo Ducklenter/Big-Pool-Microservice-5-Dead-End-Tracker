@@ -132,21 +132,20 @@ def add_page():
     new_id = f"page-{uuid.uuid4().hex[:8]}"
     new_name = body.get("name") or f"Page {new_id}"
 
+    raw_exits = body.get("exits")
+    if raw_exits is not None:
+        exits = [Exit(target_page_id=e.get("target_page_id")) for e in raw_exits]
+    else:
+        exits = [Exit()]
+
+    new_page = Page(id=new_id, name=new_name, exits=exits)
+
+    WebSite[new_id] = new_page
 
     from_page_ids = body.get("from_page_ids") or []
     if isinstance(from_page_ids, str):
         from_page_ids = [from_page_ids]
 
-    new_page = Page(id=new_id, name=new_name, exits=[Exit()])
-
-    WebSite[new_id] = new_page
-
-    if not from_page_ids:
-        candidates = _pages_with_exit_count(1)
-        pool = candidates if candidates else list(WebSite.values())
-        pool = [p for p in pool if p.id != new_id]
-        if pool:
-            from_page_ids = [random.choice(pool).id]
     source_pages = []
     for from_id in from_page_ids:
         if from_id not in WebSite:
@@ -187,6 +186,38 @@ def get_pages_by_exit_count(exit_count: int):
     ]
 
     return jsonify(pages)
+
+@app.delete("/WebSite/<page_id>")
+def delete_page(page_id: str):
+    if page_id not in WebSite:
+        return jsonify({"error": f"Page {page_id} not found"}), 404
+    del WebSite[page_id]
+    return jsonify({"deleted": page_id}), 200
+
+@app.patch("/WebSite/<page_id>/exits")
+def update_exit(page_id: str):
+    page = WebSite.get(page_id)
+    if not page:
+        return jsonify({"error": f"Page {page_id} not found"}), 404
+    
+    body = request.get_json() or {}
+    target = body.get("target_page_id")
+    exit_index = body.get("exit_index")
+
+    if not target:
+        return jsonify({"error": "Provide target_page_id"}), 400
+
+    if exit_index is not None and exit_index < len(page.exits):
+        page.exits[exit_index].target_page_id = target
+    else:
+        unset = next((e for e in page.exits if e.target_page_id is None), None)
+        if unset:
+            unset.target_page_id = target
+        else:
+            page.exits.append(Exit(target_page_id=target))
+
+    return jsonify(page.to_dict()), 200
+
 
 if __name__ == "__main__":
     app.run(port=5000)
